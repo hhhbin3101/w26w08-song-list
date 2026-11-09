@@ -1,21 +1,8 @@
+import { useLoaderData, useNavigate, Link } from 'react-router'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from "~/lib/auth-store"
 import type { Route } from "./+types/list"
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-
-import { HugeiconsIcon } from "@hugeicons/react"
-import { YoutubeIcon } from "@hugeicons/core-free-icons"
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 
 export function meta({ }: Route.MetaArgs) {
   return [
@@ -24,13 +11,39 @@ export function meta({ }: Route.MetaArgs) {
   ];
 }
 
-export default function List() {
-  const user = useAuthStore(s => s.user)
+export async function clientLoader() {
 
-  const [title, setTitle] = useState("")
-  const [artist, setArtist] = useState("")
-  const [rating, setRating] = useState(5)
-  const [lyrics, setLyrics] = useState("")
+  //-------------------------------------------------------
+  // 세션 확인
+  //-------------------------------------------------------
+  if (useAuthStore.getState().status === "loading") {
+    // 로그인 상태가 아직 로딩 중이면, 세션을 확인하고 상태를 업데이트
+    const { data: { session } } = await supabase.auth.getSession()
+    useAuthStore.getState().setSession(session)
+  }
+
+  // if (!useAuthStore.getState().session) {
+  //   console.log("로그인 세션 없음")
+  //   return { songs: [] }
+  // }
+}
+
+// 로딩 화면. HydrateFallback 이름 정해져 있음
+export function HydrateFallback() {
+  return <div>로그인 세션 연결 중...</div>
+}
+
+// 오류 화면. ErrorBoundary 이름 정해져 있음
+export function ErrorBoundary() {
+  return <div>오류 발생</div>
+}
+
+export default function List() {
+  // const { songs } = useLoaderData<typeof clientLoader>()
+  const user = useAuthStore(s => s.user)
+  const githubSignIn = useAuthStore(s => s.githubSignIn)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data: songs = [], isPending, isError, error } = useQuery({
     queryKey: ['songs'],
@@ -49,8 +62,6 @@ export default function List() {
     staleTime: 1000 * 60 * 5,
   })
 
-  const queryClient = useQueryClient()
-
   const deleteSongMutation = useMutation({
     mutationFn: async (songId: number) => {
       const { error } = await supabase
@@ -68,132 +79,65 @@ export default function List() {
     }
   })
 
-  const addSongMutation = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase
-        .from('songs')
-        .insert([{ title, artist, rating, lyrics }])
-      if (error) throw new Error(error.message)
-      return data
-    },
-    onSuccess: () => {
-      // 추가 성공 후, songs를 무효화하여 refetch되도록 함
-      queryClient.invalidateQueries({ queryKey: ['songs'] })
-
-      // 입력 필드 초기화
-      setTitle("")
-      setArtist("")
-      setRating(5)
-      setLyrics("")
-    },
-    onError: (err: any) => {
-      alert(`노래 추가 실패: ${err.message}`)
-    }
-  })
-
-  const addSongForm = () => (
-    <form onSubmit={e => {
-      e.preventDefault()
-      addSongMutation.mutate()
-    }}>
-      <input
-        type="text"
-        value={title}
-        placeholder="노래 제목 (*)"
-        onChange={e => setTitle(e.target.value)}
-        required />
-      <input
-        type="text"
-        value={artist}
-        placeholder="가수 (*)"
-        onChange={e => setArtist(e.target.value)}
-        required />
-      <label>평점:</label>
-      <input
-        type="number"
-        min="1"
-        max="5"
-        value={rating}
-        onChange={e => setRating(parseInt(e.target.value))}
-        required />
-      <textarea
-        value={lyrics}
-        placeholder="가사"
-        onChange={e => setLyrics(e.target.value)} />
-      <button type="submit" disabled={addSongMutation.isPending}>
-        노래 추가
-      </button>
-    </form>
-  )
-
-  if (!user) return null
-
-  if (isPending)
-    return <p>노래 데이터를 불러오는 중...</p>
-
-  if (isError)
-    return <p>에러 발생: {error.message}</p>
-
-  if (songs.length === 0)
-    return <p>등록된 노래가 없거나 데이터를 불러오지 못했습니다.</p>
-
   return (
     <div>
-      <div>
-        {/* { addSongForm() } */}
+      <h2>애창곡 리스트 {user && `(${user.email})`}</h2>
+      {user ? (
+        isPending ? (
+          <p>노래 데이터를 불러오는 중...</p>
+        ) : isError ? (
+          <p>에러 발생: {error.message}</p>
+        ) : (
+          <div>
+            <button
+              onClick={async () => {
+                await useAuthStore.getState().signOut()
+                // alert("로그아웃")
+                queryClient.clear()
+                navigate('/')
+              }}>
+              로그아웃
+            </button>
 
-        <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
-          {songs.map((song: any) => (
-            <Card
-              key={song.id}
-              className="flex flex-col justify-between hover:shadow-md transition-shadow bg-card border-border">
-              <CardHeader className="pb-2">
-                <CardTitle
-                  className="text-xl font-bold tracking-tight line-clamp-1">
-                  {song.title}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="flex-1 space-y-2 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  {song.artist || '가수 없음'}
-                </p>
-                {song.lyrics && (
-                  <p className="bg-muted p-2 rounded-md italic whitespace-pre-line mt-2">
-                    "{song.lyrics}"
-                  </p>
-                )}
-              </CardContent>
-
-              <CardFooter className="flex justify-between pt-0">
-                <p className="text-yellow-500">
-                  ⭐️ {song.rating} / 5
-                </p>
-
-                <a
-                  href={`https://www.youtube.com/results?search_query=노래방+${song.title}+${song.artist}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className='inline-flex items-center'>
-                  <HugeiconsIcon icon={YoutubeIcon} />
-                  노래방
-                </a>
-
-                <Button
-                  // 삭제 진행 중이면 버튼 비활성화
-                  disabled={deleteSongMutation.isPending}
-                  onClick={() => {
-                    if (confirm(`'${song.title}' 노래를 삭제하시겠습니까?`)) {
-                      deleteSongMutation.mutate(song.id)
-                    }
-                  }}>
-                  삭제
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
+            {songs.length === 0 ? (
+              <p>등록된 노래가 없거나 데이터를 불러오지 못했습니다.</p>
+            ) : (
+              <ul>
+                {songs.map((song: any) => (
+                  <li key={song.id}>
+                    <strong>{song.title}</strong> - {song.artist || '(가수 없음)'}
+                    <button
+                      // 삭제 진행 중이면 버튼 비활성화
+                      disabled={deleteSongMutation.isPending}
+                      onClick={() => {
+                        if (confirm(`'${song.title}' 노래를 삭제하시겠습니까?`)) {
+                          deleteSongMutation.mutate(song.id)
+                        }
+                      }}>
+                      삭제
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )
+      ) : (
+        <div>
+          <Link to="/login">로그인</Link>
+          <Link to="/signup">회원가입</Link>
+          <button
+            onClick={async () => {
+              try {
+                await githubSignIn()
+              } catch (err: any) {
+                alert(`GitHub 인증 실패: ${err.message}`)
+              }
+            }}>
+            GitHub 로그인
+          </button>
         </div>
-      </div>
+      )}
     </div>
   )
 }
